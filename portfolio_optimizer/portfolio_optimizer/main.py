@@ -49,7 +49,7 @@ def show_mean_variance(returns: pd.DataFrame, weights: List[float]):
     print(f"Return: {portfolio_return:.2f}")
     print(f"Volatility: {portfolio_volatility:.2f}")
 
-def show_portfolios(returns: pd.DataFrame, volatilities):
+def show_portfolios(returns: np.ndarray, volatilities):
     plt.figure(figsize=(10, 5))
     plt.scatter(volatilities, returns, c=returns/volatilities, marker="o")
     plt.grid(True)
