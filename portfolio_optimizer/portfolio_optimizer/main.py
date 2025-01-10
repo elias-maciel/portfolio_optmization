@@ -3,7 +3,6 @@ import time
 import streamlit as st
 import numpy as np
 import yfinance as yf
-import pandas as pd
 import datetime as dt
 from scipy.optimize import linprog
 from PIL import Image
