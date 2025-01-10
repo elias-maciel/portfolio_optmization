@@ -1,16 +1,16 @@
+import time
+
 import streamlit as st
 import numpy as np
 import yfinance as yf
 import pandas as pd
 import datetime as dt
-import matplotlib.pyplot as plt
-import scipy.optimize as optimization
+from scipy.optimize import linprog
 from PIL import Image
 from io import BytesIO
 
-from streamlit import columns
-
 NUM_TRADING_DAYS = 252
+
 
 def download_data(stocks, start_date, end_date, period="1d", data_type="Close"):
     stocks_str = " ".join(stocks)
@@ -18,45 +18,38 @@ def download_data(stocks, start_date, end_date, period="1d", data_type="Close"):
     df = tickers.history(start=start_date, end=end_date, period=period)
     return df[data_type]
 
+
 def calculate_return(data):
     log_return = np.log(data / data.shift(1))
-    return log_return[1:]
+    return log_return[1:].dropna()
 
-def generate_portfolios(stocks, returns, num_portfolios=10_000):
-    portfolio_means = []
-    portfolio_risks = []
-    portfolio_weights = []
-    for _ in range(num_portfolios):
-        w = np.random.random(len(stocks))
-        w /= np.sum(w)
-        portfolio_weights.append(w)
-        portfolio_means.append(np.sum(returns.mean() * w) * NUM_TRADING_DAYS)
-        portfolio_risks.append(
-            np.sqrt(np.dot(w.T, np.dot(returns.cov() * NUM_TRADING_DAYS, w)))
-        )
-    return np.array(portfolio_weights), np.array(portfolio_means), np.array(portfolio_risks)
 
-def statistics(weights, returns):
-    portfolio_return = np.sum(returns.mean() * weights) * NUM_TRADING_DAYS
-    portfolio_volatility = np.sqrt(
-        np.dot(weights.T, np.dot(returns.cov() * NUM_TRADING_DAYS, weights))
-    )
-    return np.array([portfolio_return, portfolio_volatility, portfolio_return / portfolio_volatility])
+def linear_programming_portfolio(returns, risk_threshold=None, max_allocation=0.5):
+    n = returns.shape[1]
 
-def min_function_sharpe(weights, returns):
-    return -statistics(weights, returns)[2]
+    c = -returns.mean().values
 
-def optimize_portfolio(stocks, weights, returns):
-    constraints = {"type": "eq", "fun": lambda x: np.sum(x) - 1}
-    bounds = tuple((0, 1) for _ in range(len(stocks)))
-    return optimization.minimize(
-        fun=min_function_sharpe,
-        x0=weights[0],
-        args=returns,
-        method="SLSQP",
-        bounds=bounds,
-        constraints=constraints,
-    )
+    A_eq = np.ones((1, n))
+    b_eq = [1]
+
+
+    bounds = [(0, max_allocation) for _ in range(n)]
+
+    if risk_threshold:
+        cov_matrix = returns.cov() * NUM_TRADING_DAYS
+        risk_weights = np.sqrt(np.diag(cov_matrix))
+        A_ub = [risk_weights]
+        b_ub = [risk_threshold]
+        result = linprog(c, A_eq=A_eq, b_eq=b_eq, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method="highs")
+    else:
+        result = linprog(c, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method="highs")
+
+    if not result.success:
+        st.error(f"Falha na otimização: {result.message}")
+        return None
+
+    return result
+
 
 def fig_to_image(fig):
     buf = BytesIO()
@@ -64,19 +57,20 @@ def fig_to_image(fig):
     buf.seek(0)
     return Image.open(buf)
 
-# Streamlit App
-st.title("Portfolio Optimization")
 
-# User Inputs
-st.sidebar.header("Portfolio Settings")
-stocks = st.sidebar.text_input("Enter stock tickers (comma-separated):", "AAPL,WMT,TSLA,GE,AMZN,DB")
+st.title("Otimização de Portfólio com Programação Linear")
 
-# Date range slider
+
+st.sidebar.header("Configurações do Portfólio")
+stocks = st.sidebar.text_input("Digite os tickers das ações (separados por vírgula):", "AAPL,WMT,TSLA")
+tickers = [ticker.strip() for ticker in stocks.split(",")]
+
+
 start_date = dt.date(2010, 1, 1)
 end_date = dt.date.today()
 
 date_range = st.sidebar.slider(
-    "Select Date Range:",
+    "Selecione o intervalo de datas:",
     min_value=start_date,
     max_value=end_date,
     value=(start_date, end_date),
@@ -84,57 +78,50 @@ date_range = st.sidebar.slider(
 )
 start_date, end_date = date_range
 
-num_portfolios = st.sidebar.number_input("Number of Portfolios", value=10000, step=1000)
+risk_threshold = st.sidebar.number_input("Limite de Risco (opcional, 0 para ignorar):", value=0.0, step=0.01, min_value=0.0)
 
-tickers = [ticker.strip() for ticker in stocks.split(",")]
+max_allocation = st.sidebar.slider("Alocação Máxima por Ativo:", min_value=1/len(tickers), max_value=1.0, value=0.5, step=0.05)
 
-if st.sidebar.button("Run Optimization"):
+num_portfolios = st.sidebar.number_input("Número de Portfólios Simulados (para visualização):", value=5000, step=1000)
+
+
+
+if st.sidebar.button("Executar Otimização"):
     try:
-        # Data download and calculations
-        with st.spinner("### Downloading Data..."):
+        with st.spinner("### Calculando Retornos"):
             stock_data = download_data(tickers, start_date, end_date)
+            st.write("### Visualização dos Preços das Ações")
+            st.line_chart(stock_data)
 
-        st.write("### Visualizing Stock Prices")
-        st.line_chart(stock_data)
-
-        with st.spinner("### Generating Portfolios"):
             log_daily_returns = calculate_return(stock_data)
-            weights, means, risks = generate_portfolios(tickers, log_daily_returns, num_portfolios)
+            if log_daily_returns.isnull().values.any():
+                raise ValueError("Dados de retornos contêm valores ausentes. Verifique os dados de entrada.")
+        time.sleep(2)
+        with st.spinner("### Otimizando Portfólio"):
+            result = linear_programming_portfolio(log_daily_returns, risk_threshold if risk_threshold > 0 else None,
+                                                  max_allocation)
+            if result is None:
+                st.error("Falha na otimização. Verifique as restrições e os dados de entrada.")
+                st.stop()
 
-        # Portfolio optimization
-        with st.spinner("### Optimizing Portfolio"):
-            optimum = optimize_portfolio(tickers, weights, log_daily_returns)
+            optimal_weights = result.x
+            container1 = st.container()
+            container1.header("Pesos Ótimos do Portfólio")
+            columns = container1.columns(len(tickers))
+            for ticker, weight, column in zip(tickers, optimal_weights, columns):
+                column.metric(ticker, f"{weight:.2%}")
 
-        optimal_weights = [round(opt, 3) for opt in optimum["x"]]
-        metrics = statistics(optimum["x"], log_daily_returns)
 
-        st.write("### Optimal Weights and Metrics")
-        # Creating formatted text to display weights and metrics in a table-like format
-        container = st.container()
-        expected_return, expected_volatility, sharpe_ratio = container.columns(3)
+            expected_return = -result.fun * NUM_TRADING_DAYS
+            cov_matrix = log_daily_returns.cov() * NUM_TRADING_DAYS
+            portfolio_risk = np.sqrt(np.dot(optimal_weights.T, np.dot(cov_matrix, optimal_weights)))
 
-        container2 = st.container()
-        columns = st.columns(len(tickers))
-        for i, col in enumerate(columns):
-            col.metric(tickers[i], f"{optimal_weights[i]:.2f}")
+            container2 = st.container()
+            header = container2.header("Métricas do Portfólio")
 
-        # Highlighting optimal portfolio
-        fig2, ax2 = plt.subplots(figsize=(10, 6))
-        scatter = ax2.scatter(risks, means, c=means / risks, cmap="viridis")
-        plt.colorbar(scatter, label="Sharpe Ratio")
-        plt.xlabel("Expected Volatility")
-        plt.ylabel("Expected Return")
-        plt.title("Optimal Portfolio")
-        ax2.scatter(
-            metrics[1],
-            metrics[0],
-            color="red",
-            label="Optimal Portfolio",
-            marker="*",
-            s=200,
-        )
-        plt.legend()
-        st.pyplot(fig2)
+            expected_return_column, portfolio_risk_column = container2.columns(2)
 
+            expected_return_column.metric(f"Retorno Anual Esperado", f"{expected_return:.2%}")
+            portfolio_risk_column.metric(f"Risco do Portfólio (Volatilidade)", f"{portfolio_risk:.2%}")
     except Exception as e:
-        st.error(f"An error occurred: {e}")
+        st.error(f"Ocorreu um erro: {e}")
