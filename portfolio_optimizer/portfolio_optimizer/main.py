@@ -1,56 +1,108 @@
+from pickletools import optimize
 from typing import List
 
-import streamlit as st
-import pandas as pd
+import numpy as np
 import yfinance as yf
+import pandas as pd
+import matplotlib.pyplot as plt
+import scipy.optimize as optimization
+
+NUM_TRADING_DAYS = 252
+
+def download_data(stocks: List[str], start_date: str, end_date: str, period="1d", data_type="Close") -> pd.DataFrame:
+    stocks_str = " ".join(stocks)
+    tickers = yf.Tickers(stocks_str)
+    df = tickers.history(start=start_date, end=end_date, period=period)
+    return df[data_type]
+
+def show_data(data: pd.DataFrame):
+    data.plot(figsize=(10, 5))
+    plt.show()
 
 
-@st.cache_data
-def fecth_date(tickers: List[str], start_date="2010-01-01", end_date="2024-12-25", period="1d", data_tupe="Close") -> pd.DataFrame:
-    tickers_str = " ".join(tickers)
-    yf_ticker = yf.Tickers(tickers_str)
-    df = yf_ticker.history(start=start_date, end=end_date, period=period)
-    df = df[data_tupe]
-    return df
+def calculate_return(data: pd.DataFrame):
+    log_return = np.log(data/data.shift(1))
+    return log_return[1:]
 
-@st.cache_data
-def fetch_stock_tickers() -> List[str]:
-    tickers_list = pd.read_csv("C:\\Users\\elias\\Documents\\Faculdade\\4° Semestre\\Otimização Linear\\portfolio_optimizer\\portfolio_optimizer\\in\\IBOV.csv", sep=";", encoding="UTF-8")["Codigo"].to_list()
-    return [f"{ticker}.SA" for ticker in tickers_list]
-
-# Fetch data
-tickers = fetch_stock_tickers()
-data = fecth_date(tickers)
-
-# Create the streamlit interface
-st.write("""
-# App Preço de Ações
-O gráfico abaixo representa a evolução do preço das ações do Itaú (ITUB4) ao longo dos anos
-""")
-
-# prepare filter view
-st.sidebar.header("Filters")
-
-# Filter tickers
-selected_tickers = st.multiselect("Selecione as empresas", data.columns)
-if selected_tickers:
-    data = data[selected_tickers]
-    if len(selected_tickers) == 1:
-        unique_ticker = selected_tickers[0]
-        data = data.rename(columns={unique_ticker: "Close"})
-
-# Filter date
-start_date = data.index.min().to_pydatetime()
-end_date = data.index.max().to_pydatetime()
-date_period = st.sidebar.slider("Select period", min_value=start_date, max_value=end_date, value=(start_date, end_date))
-data = data.loc[date_period[0]:date_period[1]]
+def show_statistics(returns: pd.DataFrame):
+    print(returns.mean() * NUM_TRADING_DAYS)
+    print(returns.cov() * NUM_TRADING_DAYS)
 
 
-# Create a line chart
-st.line_chart(data)
+def generate_portfolios(stocks: List[str], returns: pd.DataFrame, num_portfolios = 10_000):
+    portfolio_means = []
+    portfolio_risks =  []
+    portfolio_weights = []
+    for _ in range(num_portfolios):
+        w = np.random.random(len(stocks))
+        w /= np.sum(w)
+        portfolio_weights.append(w)
+        portfolio_means.append(np.sum(returns.mean() * w) * NUM_TRADING_DAYS)
+        portfolio_risks.append(np.sqrt(np.dot(w.T, np.dot(returns.cov() * NUM_TRADING_DAYS, w))))
+    return np.array(portfolio_weights), np.array(portfolio_means), np.array(portfolio_risks)
 
-st.write(
-    """
-    # Fim do app
-    """
-)
+
+def show_mean_variance(returns: pd.DataFrame, weights: List[float]):
+    returns_mean = returns.mean()
+    returns_cov = returns.cov()
+    portfolio_return = np.sum(returns_mean * weights) * NUM_TRADING_DAYS
+    portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(returns_cov*NUM_TRADING_DAYS, weights)))
+    print(f"Return: {portfolio_return:.2f}")
+    print(f"Volatility: {portfolio_volatility:.2f}")
+
+def show_portfolios(returns: pd.DataFrame, volatilities):
+    plt.figure(figsize=(10, 5))
+    plt.scatter(volatilities, returns, c=returns/volatilities, marker="o")
+    plt.grid(True)
+    plt.xlabel("Expected Volatility")
+    plt.ylabel("Expected Return")
+    plt.colorbar(label="Sharpe Ratio")
+    plt.show()
+
+def statistics(weights, returns):
+    portfolio_return = np.sum(returns.mean() * weights) * NUM_TRADING_DAYS
+    portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(returns.cov() * NUM_TRADING_DAYS, weights)))
+    return np.array([portfolio_return, portfolio_volatility, portfolio_return/portfolio_volatility])
+
+def min_function_sharpe(weights, returns):
+    return -statistics(weights, returns)[2]
+
+def optimize_portfolio(stocks, weights, returns):
+    constraints = {"type": "eq", "fun": lambda x: np.sum(x) - 1}
+    bounds = tuple((0, 1) for _ in range(len(stocks)))
+    return optimization.minimize(fun=min_function_sharpe, x0=weights[0], args=returns, method="SLSQP", bounds=bounds, constraints=constraints)
+
+
+def print_optimal_portfolio(optimum, returns):
+    print("Optimal weights:", optimum["x"].round(3))
+    print("Expected return, volatility and Sharpe ratio:", statistics(optimum["x"].round(3), returns))
+
+def show_optimal_portfolio(optimum, returns, portfolio_returns, portfolio_volatilities):
+    plt.figure(figsize=(10, 6))
+    plt.scatter(portfolio_volatilities, portfolio_returns, c=portfolio_returns/portfolio_volatilities, marker="o")
+    plt.grid(True)
+    plt.xlabel("Expected Volatility")
+    plt.ylabel("Expected Return")
+    plt.colorbar(label="Sharpe Ratio")
+    plt.plot(statistics(optimum["x"], returns)[1], statistics(optimum["x"], returns)[0], "g*", markersize=20.0)
+    plt.show()
+
+if __name__ == "__main__":
+    stocks = ["AAPL", "WMT", "TSLA", "GE", "AMZN", "DB"]
+    start_date = "2010-01-01"
+    end_date = "2017-01-01"
+
+
+    stock_data = download_data(stocks=stocks, start_date=start_date, end_date=end_date)
+    show_data(stock_data)
+    log_daily_returns = calculate_return(stock_data)
+
+    # show_statistics(log_daily_returns)
+
+
+    weights, means, risks = generate_portfolios(stocks, log_daily_returns)
+    show_portfolios(means, risks)
+
+    optimum = optimize_portfolio(stocks, weights, log_daily_returns)
+    print_optimal_portfolio(optimum, log_daily_returns)
+    show_optimal_portfolio(optimum, log_daily_returns, means, risks)

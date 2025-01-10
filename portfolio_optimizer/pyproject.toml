@@ -3,13 +3,14 @@ name = "portfolio-optimizer"
 version = "0.1.0"
 description = ""
 authors = ["elias-maciel <eliasfsilvamaciel@gmail.com>"]
-includes = ["portfolio_optimizer", "portfolio_optimizer.in"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.11"
 streamlit = "^1.41.1"
 yfinance = "^0.2.51"
+matplotlib = "^3.10.0"
+scipy = "^1.15.0"
 
 
 [build-system]
