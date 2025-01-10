@@ -8,6 +8,7 @@ import datetime as dt
 from scipy.optimize import linprog
 from PIL import Image
 from io import BytesIO
+from lib.utils import TICKERS_B3
 
 NUM_TRADING_DAYS = 252
 
@@ -51,12 +52,12 @@ def fig_to_image(fig):
     return Image.open(buf)
 
 
-st.title("Otimização de Portfólio com Programação Linear")
+st.title("Otimização de Portfólio")
 
 
 st.sidebar.header("Configurações do Portfólio")
-stocks = st.sidebar.text_input("Digite os tickers das ações (separados por vírgula):", "AAPL,WMT,TSLA")
-tickers = [ticker.strip() for ticker in stocks.split(",")]
+tickers = st.sidebar.multiselect("TESTE", TICKERS_B3)
+# tickers = [ticker.strip() for ticker in stocks.split(",")]
 
 
 start_date = dt.date(2010, 1, 1)
@@ -71,7 +72,7 @@ date_range = st.sidebar.slider(
 )
 start_date, end_date = date_range
 
-max_allocation = st.sidebar.slider("Alocação Máxima por Ativo:", min_value=1/len(tickers), max_value=1.0, value=0.5, step=0.05)
+max_allocation = st.sidebar.slider("Alocação Máxima por Ativo:", min_value=1/max(len(tickers), 1), max_value=1.0, value=0.5, step=0.05)
 
 if st.sidebar.button("Executar Otimização"):
     try:
