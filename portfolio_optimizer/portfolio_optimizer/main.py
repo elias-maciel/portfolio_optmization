@@ -24,7 +24,7 @@ def calculate_return(data):
     return log_return[1:].dropna()
 
 
-def linear_programming_portfolio(returns, risk_threshold=None, max_allocation=0.5):
+def linear_programming_portfolio(returns, max_allocation=0.5):
     n = returns.shape[1]
 
     c = -returns.mean().values
@@ -35,14 +35,7 @@ def linear_programming_portfolio(returns, risk_threshold=None, max_allocation=0.
 
     bounds = [(0, max_allocation) for _ in range(n)]
 
-    if risk_threshold:
-        cov_matrix = returns.cov() * NUM_TRADING_DAYS
-        risk_weights = np.sqrt(np.diag(cov_matrix))
-        A_ub = [risk_weights]
-        b_ub = [risk_threshold]
-        result = linprog(c, A_eq=A_eq, b_eq=b_eq, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method="highs")
-    else:
-        result = linprog(c, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method="highs")
+    result = linprog(c, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method="highs")
 
     if not result.success:
         st.error(f"Falha na otimização: {result.message}")
@@ -78,13 +71,7 @@ date_range = st.sidebar.slider(
 )
 start_date, end_date = date_range
 
-risk_threshold = st.sidebar.number_input("Limite de Risco (opcional, 0 para ignorar):", value=0.0, step=0.01, min_value=0.0)
-
 max_allocation = st.sidebar.slider("Alocação Máxima por Ativo:", min_value=1/len(tickers), max_value=1.0, value=0.5, step=0.05)
-
-num_portfolios = st.sidebar.number_input("Número de Portfólios Simulados (para visualização):", value=5000, step=1000)
-
-
 
 if st.sidebar.button("Executar Otimização"):
     try:
@@ -98,7 +85,7 @@ if st.sidebar.button("Executar Otimização"):
                 raise ValueError("Dados de retornos contêm valores ausentes. Verifique os dados de entrada.")
         time.sleep(2)
         with st.spinner("### Otimizando Portfólio"):
-            result = linear_programming_portfolio(log_daily_returns, risk_threshold if risk_threshold > 0 else None,
+            result = linear_programming_portfolio(log_daily_returns,
                                                   max_allocation)
             if result is None:
                 st.error("Falha na otimização. Verifique as restrições e os dados de entrada.")
